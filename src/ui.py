@@ -2,7 +2,7 @@ import curses
 import math
 import time
 
-def draw(stdscr, targets, radar_angle, selected_target_index=None, signal_history=None):
+def draw(stdscr, targets, radar_angle, selected_target_index=None, signal_history=None, car_mode=False):
     if signal_history is None: signal_history = []
     
     stdscr.clear()
@@ -19,6 +19,50 @@ def draw(stdscr, targets, radar_angle, selected_target_index=None, signal_histor
     active_target = None
     if selected_target_index is not None and selected_target_index < len(sorted_targets):
         active_target = sorted_targets[selected_target_index]
+    
+    # --- MODE: CAR (HIGH CONTRAST) ---
+    if car_mode:
+        # Find the most dangerous target
+        threats = [t for t in targets if t.is_threat]
+        pacing = [t for t in targets if getattr(t, 'is_pacing', False)]
+        
+        primary_target = None
+        status_color = curses.color_pair(2)
+        status_text = "SECURE"
+        
+        if pacing:
+            primary_target = pacing[0]
+            status_color = curses.color_pair(4) | curses.A_BOLD | curses.A_BLINK
+            status_text = "PACING DETECTED"
+        elif threats:
+            # Sort threats by signal
+            threats.sort(key=lambda x: x.signal, reverse=True)
+            primary_target = threats[0]
+            status_color = curses.color_pair(3) | curses.A_BOLD
+            status_text = "THREAT DETECTED"
+        
+        # Draw Big Status Bar
+        stdscr.attron(status_color)
+        stdscr.addstr(1, 2, status_text.center(w-4))
+        stdscr.attroff(status_color)
+        
+        if primary_target:
+            # Huge Signal Bar
+            sig_str = f"{primary_target.signal}%"
+            stdscr.addstr(4, 2, sig_str, curses.A_BOLD | curses.A_REVERSE)
+            
+            # Info
+            stdscr.addstr(6, 2, f"SSID: {primary_target.ssid[:20]}")
+            stdscr.addstr(7, 2, f"VEND: {primary_target.vendor[:20]}")
+            stdscr.addstr(8, 2, f"TYPE: {primary_target.threat_label}")
+            
+            if getattr(primary_target, 'is_pacing', False):
+                 stdscr.addstr(10, 2, "!!! VEHICLE FOLLOWING !!!", curses.color_pair(4) | curses.A_BOLD)
+        else:
+            stdscr.addstr(cy, cx-5, "SCANNING...", curses.A_DIM)
+            
+        stdscr.refresh()
+        return
 
     # --- MODE: SEEKER ---
     if active_target:

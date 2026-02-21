@@ -15,6 +15,7 @@ A Termux-native reconnaissance radar for Android (and Linux).
    python main.py
    ```
 3. Grant "Location" permission to the Termux:API app in Android settings.
+4. For audio alerts, ensure `termux-tts-speak` is working (may require TTS engine install).
 
 ### Linux (Desktop)
 1. Install requirements:
@@ -30,4 +31,22 @@ A Termux-native reconnaissance radar for Android (and Linux).
 ## Features
 - Real-time Wi-Fi radar HUD.
 - Auto-detection of "Suspicious" SSIDs (Police, Bodycams, Surveillance).
+- **V7 Automotive Edition**:
+  - **High-Contrast Dashboard**: Run with `--car` for a driver-focused UI.
+  - **Voice Alerts**: TTS announcements for critical threats.
+  - **Pacing Detection**: Warns if a signal is persistently following you at speed.
+  - **SQLite Logging**: High-performance database storage (`logs/civops.db`).
 - Offline-first.
+
+## Usage
+
+```bash
+# Standard Radar Mode
+python main.py
+
+# Car Mode (High Contrast + Big Text)
+python main.py --car
+
+# Headless (Logging only)
+python main.py --headless
+```

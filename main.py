@@ -14,6 +14,7 @@ from src.kml import export_kml
 targets = []
 scanning_active = True
 seek_history = []
+CAR_MODE = False
 
 def scan_loop():
     global targets, scanning_active
@@ -30,7 +31,7 @@ def scan_loop():
             pass
 
 def main(stdscr):
-    global targets, scanning_active, seek_history
+    global targets, scanning_active, seek_history, CAR_MODE
     
     curses.curs_set(0)
     curses.start_color()
@@ -89,7 +90,7 @@ def main(stdscr):
                     seek_history.append(t.signal)
                     if len(seek_history) > 60: seek_history.pop(0)
             
-            draw(stdscr, current_targets, angle, seek_index, seek_history)
+            draw(stdscr, current_targets, angle, seek_index, seek_history, car_mode=CAR_MODE)
             time.sleep(0.05)
             
     finally:
@@ -111,7 +112,8 @@ def headless_mode():
             if targets:
                 threat_count = sum(1 for t in targets if t.is_threat)
                 mobile_count = sum(1 for t in targets if t.is_mobile)
-                print(f"\r[Status] Targets: {len(targets)} | Threats: {threat_count} | Mobile: {mobile_count}", end="")
+                pacing_count = sum(1 for t in targets if getattr(t, 'is_pacing', False))
+                print(f"\r[Status] Targets: {len(targets)} | Threats: {threat_count} | Mobile: {mobile_count} | Pacing: {pacing_count}", end="")
     except KeyboardInterrupt:
         print("\nStopping...")
     finally:
@@ -122,7 +124,10 @@ def headless_mode():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CivOps Wifi Scanner")
     parser.add_argument("--headless", action="store_true", help="Run without UI (logging only)")
+    parser.add_argument("--car", action="store_true", help="Run in High-Contrast Car Mode")
     args = parser.parse_args()
+
+    CAR_MODE = args.car
 
     if args.headless:
         headless_mode()
