@@ -10,6 +10,31 @@ from datetime import datetime
 from .threats import classify_threat
 from .config import CONFIG
 
+def calculate_distance(signal_strength, freq_str="2.4G"):
+    """
+    Log-Distance Path Loss Model
+    d = 10 ^ ((TxPower - RSSI) / (10 * n))
+    """
+    # Base params
+    tx_power = -38 # Reference RSSI at 1 meter
+    n = 2.5 # Path loss exponent (2.0=free space, 3.0=complex indoor)
+    
+    # Frequency adjustment
+    if "5G" in freq_str:
+        tx_power = -42 
+        n = 3.0
+
+    try:
+        # We assume signal_strength is 0-100% (normalized)
+        # Convert back to approx dBm: % = 2 * (dBm + 100) -> dBm = (% / 2) - 100
+        rssi = (signal_strength / 2) - 100
+            
+        ratio = (tx_power - rssi) / (10 * n)
+        dist = math.pow(10, ratio)
+        return round(dist, 2)
+    except:
+        return 0.0
+
 class Target:
     def __init__(self, ssid, bssid, signal, freq, encryption, lat=None, lon=None):
         self.ssid = ssid or "HIDDEN"
@@ -20,9 +45,12 @@ class Target:
         self.lat = lat
         self.lon = lon
         
+        # Advanced Signal Math: Distance Estimation
+        self.dist_m = calculate_distance(self.signal, self.freq)
+        
         self.is_threat, self.threat_label, self.confidence = classify_threat(self.ssid, self.bssid)
         
-        # Visuals (Random start position)
+        # Visuals (Random start position for radar blip)
         self.dist = max(0.1, 1.0 - (self.signal / 110.0))
         self.angle = random.uniform(0, 2 * math.pi)
         self.last_seen = 0
@@ -42,8 +70,6 @@ def get_gps_location():
     
     if shutil.which("termux-location"):
         try:
-            # -p parallel, -r request updates? No, just run it. 
-            # -last is faster but less accurate. Let's try default with timeout.
             out = subprocess.check_output("termux-location", shell=True, timeout=3).decode()
             data = json.loads(out)
             return data.get("latitude"), data.get("longitude")
@@ -55,7 +81,6 @@ def log_threats(targets):
     """Logs detected threats to CSV."""
     log_file = CONFIG.get("log_file", "logs/intercepts.csv")
     
-    # Ensure directory exists
     directory = os.path.dirname(log_file)
     if directory:
         os.makedirs(directory, exist_ok=True)
@@ -98,7 +123,6 @@ def scan():
                 rssi = net.get("rssi", -100)
                 freq_int = net.get("frequency_mhz", 0)
                 
-                # Determine Band
                 band = "2.4G"
                 if freq_int > 5000: band = "5G"
                 if freq_int > 6000: band = "6G"
@@ -152,12 +176,8 @@ def scan():
             pass
 
     # 3. Demo Mode (Fallback)
-    # Check config for demo mode preference, or default to fallback
     if not targets:
         for _ in range(5):
             targets.append(Target(f"DEMO_{random.randint(100,999)}", "00:00:00:00:00:00", random.randint(20,90), "2.4", "WPA", lat, lon))
-        # Don't log demo targets unless needed, but task says 'save all detected threats'. 
-        # Demo targets can be threats if they match patterns? 
-        # Let's assume random ones are not threats unless forced.
     
     return targets
