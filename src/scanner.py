@@ -6,9 +6,15 @@ import shutil
 import time
 import csv
 import os
+import statistics
 from datetime import datetime
-from .threats import classify_threat
+from .threats import classify_threat, resolve_vendor
 from .config import CONFIG
+
+# --- HISTORY TRACKING FOR VELOCITY ---
+# format: {bssid: [(timestamp, signal, lat, lon), ...]}
+TARGET_HISTORY = {} 
+HISTORY_MAX_LEN = 20
 
 def calculate_distance(signal_strength, freq_str="2.4G"):
     """
@@ -45,10 +51,14 @@ class Target:
         self.lat = lat
         self.lon = lon
         
+        # Vendor Resolution
+        self.vendor = resolve_vendor(bssid)
+        
         # Advanced Signal Math: Distance Estimation
         self.dist_m = calculate_distance(self.signal, self.freq)
         
         self.is_threat, self.threat_label, self.confidence = classify_threat(self.ssid, self.bssid)
+        self.is_mobile = False # Will be updated by history analysis
         
         # Visuals (Random start position for radar blip)
         self.dist = max(0.1, 1.0 - (self.signal / 110.0))
@@ -77,6 +87,58 @@ def get_gps_location():
             return None, None
     return None, None
 
+def analyze_mobility(target):
+    """
+    Determines if a target is MOBILE based on signal/GPS variance.
+    Updates TARGET_HISTORY and sets target.is_mobile.
+    """
+    global TARGET_HISTORY
+    
+    now = time.time()
+    if target.bssid not in TARGET_HISTORY:
+        TARGET_HISTORY[target.bssid] = []
+    
+    # Add current point
+    history = TARGET_HISTORY[target.bssid]
+    history.append((now, target.signal, target.lat, target.lon))
+    
+    # Prune old history
+    if len(history) > HISTORY_MAX_LEN:
+        history.pop(0)
+    
+    # Need at least 5 points (~10-15s) to determine velocity
+    if len(history) < 5:
+        return
+
+    # Extract series
+    signals = [x[1] for x in history]
+    lats = [x[2] for x in history if x[2] is not None]
+    
+    # Calculate Variance
+    sig_variance = statistics.variance(signals) if len(signals) > 1 else 0
+    
+    # GPS Variance (My movement)
+    gps_variance = 0
+    if len(lats) > 1:
+        gps_variance = statistics.variance(lats) * 100000 # Scale up for small deg changes
+    
+    # Logic:
+    # 1. I am stable (GPS var low) AND Signal changes rapidly (Sig var high) -> Target Moving
+    # 2. I am moving (GPS var high) AND Signal is stable (Sig var low) -> Target Following me (Moving)
+    
+    is_moving = False
+    
+    # Thresholds need tuning. 
+    # Sig variance > 50 (e.g. fluctuating 5-10%) implies movement or fading
+    # GPS variance > 1.0 implies I am moving
+    
+    if gps_variance < 0.1 and sig_variance > 20:
+        is_moving = True
+    elif gps_variance > 1.0 and sig_variance < 10:
+        is_moving = True
+        
+    target.is_mobile = is_moving
+
 def log_threats(targets):
     """Logs detected threats to CSV."""
     log_file = CONFIG.get("log_file", "logs/intercepts.csv")
@@ -90,21 +152,23 @@ def log_threats(targets):
     with open(log_file, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
-            writer.writerow(["Timestamp", "SSID", "BSSID", "Signal", "Freq", "Encryption", "Latitude", "Longitude", "Threat Label", "Confidence"])
+            writer.writerow(["Timestamp", "SSID", "BSSID", "Vendor", "Signal", "Freq", "Encryption", "Latitude", "Longitude", "Threat Label", "Confidence", "Mobile"])
             
         for t in targets:
-            if t.is_threat:
+            if t.is_threat or t.is_mobile: # Log mobile targets too
                 writer.writerow([
                     datetime.now().isoformat(),
                     t.ssid,
                     t.bssid,
+                    t.vendor,
                     t.signal,
                     t.freq,
                     t.encryption,
                     t.lat if t.lat else "",
                     t.lon if t.lon else "",
                     t.threat_label,
-                    t.confidence
+                    t.confidence,
+                    "YES" if t.is_mobile else "NO"
                 ])
 
 def scan():
@@ -129,7 +193,9 @@ def scan():
                 
                 freq = f"{band}"
                 
-                targets.append(Target(ssid, bssid, normalize_rssi(rssi), freq, "UNK", lat, lon))
+                t = Target(ssid, bssid, normalize_rssi(rssi), freq, "UNK", lat, lon)
+                analyze_mobility(t)
+                targets.append(t)
             
             if targets:
                 log_threats(targets)
@@ -167,7 +233,9 @@ def scan():
                         if "5180" in line or "5200" in line or "5GHz" in line: freq = "5G"
                         else: freq = "2.4G"
 
-                targets.append(Target(ssid, bssid, signal, freq, "WPA", lat, lon))
+                t = Target(ssid, bssid, signal, freq, "WPA", lat, lon)
+                analyze_mobility(t)
+                targets.append(t)
             
             if targets:
                 log_threats(targets)
@@ -178,6 +246,8 @@ def scan():
     # 3. Demo Mode (Fallback)
     if not targets:
         for _ in range(5):
-            targets.append(Target(f"DEMO_{random.randint(100,999)}", "00:00:00:00:00:00", random.randint(20,90), "2.4", "WPA", lat, lon))
+            t = Target(f"DEMO_{random.randint(100,999)}", "00:00:00:00:00:00", random.randint(20,90), "2.4", "WPA", lat, lon)
+            analyze_mobility(t)
+            targets.append(t)
     
     return targets

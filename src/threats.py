@@ -1,4 +1,23 @@
-# Threat Signatures and Classification Logic (Deep Research V2)
+import json
+import gzip
+import os
+
+# --- LOAD OUI DATABASE ---
+VENDOR_DB = {}
+try:
+    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "vendors.json.gz")
+    if os.path.exists(db_path):
+        with gzip.open(db_path, "rt", encoding="utf-8") as f:
+            VENDOR_DB = json.load(f)
+except Exception as e:
+    pass # Fail silently, features will just be missing
+
+def resolve_vendor(mac):
+    """Resolves a MAC address to a vendor name using the compressed DB."""
+    if not mac: return "UNKNOWN"
+    clean_mac = mac.upper().replace("-", ":")
+    prefix = clean_mac[:8] # XX:XX:XX
+    return VENDOR_DB.get(prefix, "UNKNOWN")
 
 # --- SSID KEYWORDS (Heuristic) ---
 # Expanded based on verified municipal/police network standards.

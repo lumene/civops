@@ -2,6 +2,9 @@ import curses
 import time
 import math
 import threading
+import argparse
+import sys
+import signal
 from src.scanner import scan
 from src.ui import draw
 from src.config import CONFIG
@@ -17,10 +20,14 @@ def scan_loop():
     interval = CONFIG.get("scan_interval", 2.0)
     
     while scanning_active:
-        new_data = scan()
-        if new_data:
-            targets = new_data
-        time.sleep(interval)
+        try:
+            new_data = scan()
+            if new_data:
+                targets = new_data
+            time.sleep(interval)
+        except Exception as e:
+            # In headless mode, we might want to log this error
+            pass
 
 def main(stdscr):
     global targets, scanning_active, seek_history
@@ -41,7 +48,11 @@ def main(stdscr):
     
     try:
         while True:
-            c = stdscr.getch()
+            try:
+                c = stdscr.getch()
+            except KeyboardInterrupt:
+                break
+
             if c == ord('q'): break
             
             # K for KML Export
@@ -85,8 +96,39 @@ def main(stdscr):
         scanning_active = False
         scan_thread.join(timeout=1.0)
 
-if __name__ == "__main__":
+def headless_mode():
+    global scanning_active
+    print("Starting CivOps in HEADLESS MODE...")
+    print("Press Ctrl+C to stop.")
+    
+    scan_thread = threading.Thread(target=scan_loop, daemon=True)
+    scan_thread.start()
+    
     try:
-        curses.wrapper(main)
+        while scanning_active:
+            time.sleep(1)
+            # Optional: Print status every few seconds
+            if targets:
+                threat_count = sum(1 for t in targets if t.is_threat)
+                mobile_count = sum(1 for t in targets if t.is_mobile)
+                print(f"\r[Status] Targets: {len(targets)} | Threats: {threat_count} | Mobile: {mobile_count}", end="")
     except KeyboardInterrupt:
-        pass
+        print("\nStopping...")
+    finally:
+        scanning_active = False
+        scan_thread.join(timeout=2.0)
+        print("Clean exit.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="CivOps Wifi Scanner")
+    parser.add_argument("--headless", action="store_true", help="Run without UI (logging only)")
+    args = parser.parse_args()
+
+    if args.headless:
+        headless_mode()
+    else:
+        try:
+            curses.wrapper(main)
+        except KeyboardInterrupt:
+            # Handle Ctrl+C during curses initialization/wrapper
+            pass
